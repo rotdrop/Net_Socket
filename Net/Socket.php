@@ -35,6 +35,7 @@
  * @package   Net_Socket
  * @author    Stig Bakken <ssb@php.net>
  * @author    Chuck Hagenbuch <chuck@horde.org>
+ * @author    Claus-Justus Heine <himself@claus-justus-heine.de>
  * @copyright 1997-2017 The PHP Group
  * @license   http://opensource.org/licenses/bsd-license.php BSD-2-Clause
  * @link      http://pear.php.net/packages/Net_Socket
@@ -193,7 +194,7 @@ class Net_Socket extends PEAR
             if ($errno === 0 && !strlen($errstr)) {
                 $errstr = '';
                 if (isset($old_track_errors)) {
-                    $errstr = $php_errormsg ?: '';  
+                    $errstr = $php_errormsg ?: '';
                     @ini_set('track_errors', $old_track_errors);
                 } else {
                     $lastError = error_get_last();
@@ -411,7 +412,10 @@ class Net_Socket extends PEAR
      * @param string $data Data to write.
      * @param integer $blocksize Amount of data to write at once.
      *                           NULL means all at once.
-     *
+     * @param function $progressCallback($pos, $size) Called after
+     *     each chunk of $blocksize many bytes or only once at end
+     *     with the amount of bytes written so far and the total size
+     *     to write (strlen($data)) as second argument.
      * @access public
      * @return mixed If the socket is not connected, returns an instance of
      *               PEAR_Error.
@@ -419,13 +423,24 @@ class Net_Socket extends PEAR
      *               If the write fails, returns false.
      *               If the socket times out, returns an instance of PEAR_Error.
      */
-    public function write($data, $blocksize = null)
+    public function write($data, $blocksize = null, $progressCallback = null)
     {
         if (!is_resource($this->fp)) {
             return $this->raiseError('not connected');
         }
 
+        $feedBack = false;
+        $size = 0;
+        if (is_callable($progressCallback)) {
+            $feedBack = true;
+            $size = strlen($data);
+        }
+
         if (null === $blocksize && !OS_WINDOWS) {
+            if ($feedBack) {
+                call_user_func($progressCallback, 0, $size);
+            }
+
             $written = @fwrite($this->fp, $data);
 
             // Check for timeout or lost connection
@@ -441,6 +456,10 @@ class Net_Socket extends PEAR
                 }
             }
 
+            if ($feedBack) {
+                call_user_func($progressCallback, $written, $size);
+            }
+
             return $written;
         } else {
             if (null === $blocksize) {
@@ -450,6 +469,10 @@ class Net_Socket extends PEAR
             $pos = 0;
             $size = strlen($data);
             while ($pos < $size) {
+                if ($feedBack) {
+                    call_user_func($progressCallback, $pos, $size);
+                }
+
                 $written = @fwrite($this->fp, substr($data, $pos, $blocksize));
 
                 // Check for timeout or lost connection
@@ -468,6 +491,10 @@ class Net_Socket extends PEAR
                 }
 
                 $pos += $written;
+            }
+
+            if ($feedBack) {
+                call_user_func($progressCallback, $pos, $size);
             }
 
             return $pos;
